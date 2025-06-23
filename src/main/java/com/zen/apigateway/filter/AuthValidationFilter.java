@@ -1,16 +1,22 @@
 package com.zen.apigateway.filter;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ServerWebExchange;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import reactor.core.publisher.Mono;
 
 @Component
@@ -45,21 +51,47 @@ public class AuthValidationFilter implements GlobalFilter {
                 .uri("lb://auth-service/auth/validate")
                 .header(HttpHeaders.AUTHORIZATION, authHeader)
                 .retrieve()
-                .onStatus(
-                        status -> status.is4xxClientError() || status.is5xxServerError(),
-                        response -> Mono.error(new RuntimeException("Unauthorized"))
-                )
-                .bodyToMono(Map.class)
-                .flatMap(claims -> {
-                    ServerHttpRequest mutated = exchange.getRequest().mutate()
-                            .header("X-User-Id", claims.get("userId").toString())
-                            .header("X-Tenant-Id", claims.get("tenantId").toString())
-                            .build();
-                    return chain.filter(exchange.mutate().request(mutated).build());
+                .toEntity(String.class)
+                .flatMap(responseEntity -> {
+                    if (responseEntity.getStatusCode().is2xxSuccessful()) {
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        Map<String, Object> body;
+                        try {
+                            body = objectMapper.readValue(responseEntity.getBody(), Map.class);
+                        } catch (Exception e) {
+                            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                            return exchange.getResponse().setComplete();
+                        }
+
+                        Map<String, String> data = (Map<String, String>) body.get("data");
+                        ServerHttpRequest mutated = exchange.getRequest().mutate()
+                                .header("X-User-Id", data.get("email"))
+                                .header("X-Tenant-Id", data.get("tenantId"))
+                                .build();
+
+                        return chain.filter(exchange.mutate().request(mutated).build());
+                    } else {
+                        exchange.getResponse().setStatusCode(responseEntity.getStatusCode());
+                        exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                        DataBuffer buffer = exchange.getResponse()
+                                .bufferFactory()
+                                .wrap(responseEntity.getBody().getBytes(StandardCharsets.UTF_8));
+                        return exchange.getResponse().writeWith(Mono.just(buffer));
+                    }
                 })
                 .onErrorResume(ex -> {
                     exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                    return exchange.getResponse().setComplete();
+                    exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                    String errorJson = """
+                        {
+                            "success": false,
+                            "message": "Unauthorized - Token invalid or Auth Service error",
+                            "data": null
+                        }
+                        """;
+                    DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(errorJson.getBytes(StandardCharsets.UTF_8));
+                    return exchange.getResponse().writeWith(Mono.just(buffer));
                 });
+
     }
 }
