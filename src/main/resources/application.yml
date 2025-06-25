@@ -65,11 +65,6 @@ management:
 logging:
   level:
     root: INFO
-    org.springframework.cloud.gateway: DEBUG
-    org.springframework.cloud.gateway.route.RouteDefinitionLocator: DEBUG
-    org.springframework.cloud.loadbalancer: DEBUG
-    com.netflix.discovery: DEBUG
-    org.springframework.cloud.netflix.eureka: DEBUG
 
   file:
     name: logs/apigateway-debug.log
