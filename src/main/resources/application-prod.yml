@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/**
+
+        - id: crm-service
+          uri: lb://crm-service
+          predicates:
+            - Path=/crm/**
+
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+        - name: Retry
+          args:
+            retries: 3
+            statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+            methods: GET, POST
+
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+  security:
+    csrf:
+      enabled: false
+
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+server:
+  port: 8443
+  ssl:
+    key-store: classpath:keystore.p12
+    key-store-password: changeit
+    key-store-type: PKCS12
+    key-alias: my-ssl-key
+
+eureka:
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    service-url:
+      defaultZone: http://localhost:8767/eureka
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      enabled: true
+      show-details: always
+    metrics:
+      enabled: true
+
+logging:
+  level:
+    root: DEBUG
+
+  file:
+    name: logs/apigateway-debug.log
+
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{requestId}] [%X{sessionId}] %-5level %logger{36} - %msg%n"
