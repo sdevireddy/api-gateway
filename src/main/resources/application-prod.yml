@@ -48,7 +48,7 @@ eureka:
     register-with-eureka: true
     fetch-registry: true
     service-url:
-      defaultZone: http://localhost:8767/eureka
+      defaultZone: http://ec2-13-49-44-42.eu-north-1.compute.amazonaws.com:8767/eureka
 
 management:
   endpoints:
