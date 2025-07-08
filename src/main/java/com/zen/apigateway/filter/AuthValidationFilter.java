@@ -2,7 +2,10 @@ package com.zen.apigateway.filter;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
@@ -22,29 +25,47 @@ import reactor.core.publisher.Mono;
 @Component
 public class AuthValidationFilter implements GlobalFilter {
 
-	@Autowired
+    private static final Logger log = LoggerFactory.getLogger(AuthValidationFilter.class);
+
     private final WebClient.Builder webClientBuilder;
 
+    @Autowired
     public AuthValidationFilter(WebClient.Builder webClientBuilder) {
         this.webClientBuilder = webClientBuilder;
     }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        String path = exchange.getRequest().getURI().getPath();
+        // Generate a unique request ID for tracing
+        String requestId = UUID.randomUUID().toString();
+        log.info("✅ Generated X-Request-ID: {}", requestId);
 
-        // ⛔ Skip authentication for public endpoints
+        // Mutate the original request to include X-Request-ID
+        ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                .header("X-Request-ID", requestId)
+                .build();
+
+        ServerWebExchange mutatedExchange = exchange.mutate().request(mutatedRequest).build();
+
+        String path = mutatedRequest.getURI().getPath();
+        log.info("🔀 Incoming request path: {}", path);
+
+        // Skip authentication for public endpoints
         if (path.startsWith("/auth/login") || path.startsWith("/auth/createAccount")) {
-            return chain.filter(exchange);
+            log.info("🔓 Public endpoint accessed, skipping auth: {}", path);
+            return chain.filter(mutatedExchange)
+                .doFinally(signal -> log.info("➡️ Forwarded to service: auth-service | path: {}", path));
         }
 
-        // ✅ JWT validation for other endpoints
-        String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-
+        // Extract Authorization header
+        String authHeader = mutatedRequest.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-            return exchange.getResponse().setComplete();
+            log.warn("⛔ Missing or invalid Authorization header");
+            mutatedExchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+            return mutatedExchange.getResponse().setComplete();
         }
+
+        log.info("🛡️ Validating JWT token via auth-service");
 
         return webClientBuilder.build()
                 .post()
@@ -54,34 +75,46 @@ public class AuthValidationFilter implements GlobalFilter {
                 .toEntity(String.class)
                 .flatMap(responseEntity -> {
                     if (responseEntity.getStatusCode().is2xxSuccessful()) {
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        Map<String, Object> body;
                         try {
-                            body = objectMapper.readValue(responseEntity.getBody(), Map.class);
+                            ObjectMapper objectMapper = new ObjectMapper();
+                            Map<String, Object> body = objectMapper.readValue(responseEntity.getBody(), Map.class);
+                            Map<String, String> data = (Map<String, String>) body.get("data");
+
+                            String email = data.get("email");
+                            String tenantId = data.get("tenantId");
+
+                            log.info("✅ Auth success for user: {} | tenant: {}", email, tenantId);
+
+                            // Mutate request again with user-specific headers
+                            ServerHttpRequest enrichedRequest = mutatedRequest.mutate()
+                                    .header("X-User-Id", email)
+                                    .header("X-Tenant-Id", tenantId)
+                                    .build();
+
+                            return chain.filter(mutatedExchange.mutate().request(enrichedRequest).build());
+
                         } catch (Exception e) {
-                            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                            return exchange.getResponse().setComplete();
+                            log.error("❌ Failed to parse auth service response: {}", e.getMessage());
+                            mutatedExchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                            return mutatedExchange.getResponse().setComplete();
                         }
 
-                        Map<String, String> data = (Map<String, String>) body.get("data");
-                        ServerHttpRequest mutated = exchange.getRequest().mutate()
-                                .header("X-User-Id", data.get("email"))
-                                .header("X-Tenant-Id", data.get("tenantId"))
-                                .build();
-
-                        return chain.filter(exchange.mutate().request(mutated).build());
                     } else {
-                        exchange.getResponse().setStatusCode(responseEntity.getStatusCode());
-                        exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-                        DataBuffer buffer = exchange.getResponse()
+                        log.warn("❌ Auth service returned non-200: {} - {}",
+                                responseEntity.getStatusCode(), responseEntity.getBody());
+
+                        mutatedExchange.getResponse().setStatusCode(responseEntity.getStatusCode());
+                        mutatedExchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                        DataBuffer buffer = mutatedExchange.getResponse()
                                 .bufferFactory()
                                 .wrap(responseEntity.getBody().getBytes(StandardCharsets.UTF_8));
-                        return exchange.getResponse().writeWith(Mono.just(buffer));
+                        return mutatedExchange.getResponse().writeWith(Mono.just(buffer));
                     }
                 })
                 .onErrorResume(ex -> {
-                    exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                    exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                    log.error("❌ Exception while calling auth-service: {}", ex.getMessage());
+                    mutatedExchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+                    mutatedExchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
                     String errorJson = """
                         {
                             "success": false,
@@ -89,9 +122,10 @@ public class AuthValidationFilter implements GlobalFilter {
                             "data": null
                         }
                         """;
-                    DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(errorJson.getBytes(StandardCharsets.UTF_8));
-                    return exchange.getResponse().writeWith(Mono.just(buffer));
+                    DataBuffer buffer = mutatedExchange.getResponse()
+                            .bufferFactory()
+                            .wrap(errorJson.getBytes(StandardCharsets.UTF_8));
+                    return mutatedExchange.getResponse().writeWith(Mono.just(buffer));
                 });
-
     }
 }
