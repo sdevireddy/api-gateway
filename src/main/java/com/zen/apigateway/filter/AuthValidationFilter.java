@@ -1,12 +1,14 @@
 package com.zen.apigateway.filter;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -22,12 +24,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import reactor.core.publisher.Mono;
 
+import org.springframework.cloud.client.discovery.DiscoveryClient;
+import org.springframework.cloud.client.ServiceInstance;
+
 @Component
 public class AuthValidationFilter implements GlobalFilter {
 
     private static final Logger log = LoggerFactory.getLogger(AuthValidationFilter.class);
 
     private final WebClient.Builder webClientBuilder;
+    
+    @Autowired
+    private DiscoveryClient discoveryClient;
 
     @Autowired
     public AuthValidationFilter(WebClient.Builder webClientBuilder) {
@@ -49,10 +57,24 @@ public class AuthValidationFilter implements GlobalFilter {
 
         String path = mutatedRequest.getURI().getPath();
         log.info("🔀 Incoming request path: {}", path);
+        
+        
 
-        // Skip authentication for public endpoints
         if (path.startsWith("/auth/login") || path.startsWith("/auth/createAccount")) {
             log.info("🔓 Public endpoint accessed, skipping auth: {}", path);
+
+            // 🔍 Get Eureka-registered instances of auth-service
+            List<ServiceInstance> instances = discoveryClient.getInstances("auth-service");
+
+            if (instances.isEmpty()) {
+                log.warn("⚠️ No instances found for auth-service in registry!");
+            } else {
+                log.info("🧭 Listing available instances of auth-service:");
+                for (ServiceInstance instance : instances) {
+                    log.info("  → Instance: {}:{} | URI: {}", instance.getHost(), instance.getPort(), instance.getUri());
+                }
+            }
+
             return chain.filter(mutatedExchange)
                 .doFinally(signal -> log.info("➡️ Forwarded to service: auth-service | path: {}", path));
         }
