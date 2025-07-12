@@ -5,23 +5,38 @@ spring:
   cloud:
     gateway:
       routes:
+        # 🔓 No retry for this public endpoint
+        - id: auth-create-account
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/createAccount
+
+        # 🔐 Retry for all other auth endpoints
         - id: auth-service
           uri: lb://auth-service
           predicates:
             - Path=/auth/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
 
+        # 🧩 CRM service route with retry
         - id: crm-service
           uri: lb://crm-service
           predicates:
             - Path=/crm/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
 
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
-        - name: Retry
-          args:
-            retries: 3
-            statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
-            methods: GET, POST
 
       discovery:
         locator:
