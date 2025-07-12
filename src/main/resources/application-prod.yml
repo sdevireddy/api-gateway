@@ -5,30 +5,35 @@ spring:
   cloud:
     gateway:
       routes:
+        - id: auth-create-account
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/createAccount
+
         - id: auth-service
           uri: lb://auth-service
           predicates:
             - Path=/auth/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
 
         - id: crm-service
           uri: lb://crm-service
           predicates:
             - Path=/crm/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
 
       default-filters:
-        - name: DedupeResponseHeader
-          args:
-            name: Access-Control-Allow-Credentials
-            strategy: RETAIN_FIRST
-        - name: DedupeResponseHeader
-          args:
-            name: Access-Control-Allow-Origin
-            strategy: RETAIN_FIRST
-        - name: Retry
-          args:
-            retries: 3
-            statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
-            methods: GET, POST
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
 
       discovery:
         locator:
@@ -45,20 +50,23 @@ spring:
 server:
   port: 8443
   ssl:
-    enabled: false
+    enabled: true
     key-store: classpath:keystore.p12
     key-store-password: password
     key-store-type: PKCS12
     key-alias: springboot
 
 eureka:
-  instance:
-    prefer-ip-address: true
   client:
     register-with-eureka: true
     fetch-registry: true
     service-url:
-      defaultZone: http://localhost:8767/eureka
+      defaultZone: http://ec2-16-171-41-109.eu-north-1.compute.amazonaws.com:8767/eureka
+
+  instance:
+    hostname: ec2-16-170-230-190.eu-north-1.compute.amazonaws.com
+    prefer-ip-address: false
+    instance-id: ec2-16-170-230-190.eu-north-1.compute.amazonaws.com:auth-service:8082
 
 management:
   endpoints:
@@ -74,10 +82,8 @@ management:
 
 logging:
   level:
-    root: INFO
-
+    root: DEBUG
   file:
     name: logs/apigateway-debug.log
-
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%X{requestId}] [%X{sessionId}] %-5level %logger{36} - %msg%n"
