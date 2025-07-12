@@ -38,7 +38,7 @@ spring:
 server:
   port: 8443
   ssl:
-    enabled: true
+    enabled: false
     key-store: classpath:keystore.p12
     key-store-password: password
     key-store-type: PKCS12
@@ -49,7 +49,7 @@ eureka:
     register-with-eureka: true
     fetch-registry: true
     service-url:
-      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8767/eureka}
+      defaultZone: http://localhost:8767/eureka
 
 management:
   endpoints:
