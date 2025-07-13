@@ -5,11 +5,13 @@ spring:
   cloud:
     gateway:
       routes:
+        # 🔓 No retry for this public endpoint
         - id: auth-create-account
           uri: lb://auth-service
           predicates:
             - Path=/auth/createAccount
 
+        # 🔐 Retry for all other auth endpoints
         - id: auth-service
           uri: lb://auth-service
           predicates:
@@ -21,6 +23,7 @@ spring:
                 statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
                 methods: GET, POST
 
+        # 🧩 CRM service route with retry
         - id: crm-service
           uri: lb://crm-service
           predicates:
@@ -48,13 +51,9 @@ spring:
     exclude: org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
 
 server:
-  port: 8443
+  port: 8080
   ssl:
-    enabled: true
-    key-store: classpath:keystore.p12
-    key-store-password: password
-    key-store-type: PKCS12
-    key-alias: springboot
+    enabled: false
 
 eureka:
   client:
@@ -66,7 +65,7 @@ eureka:
   instance:
     hostname: ec2-16-170-230-190.eu-north-1.compute.amazonaws.com
     prefer-ip-address: false
-    instance-id: ec2-16-170-230-190.eu-north-1.compute.amazonaws.com:auth-service:8082
+    instance-id: ec2-16-170-230-190.eu-north-1.compute.amazonaws.com:api-gateway:8080
 
 management:
   endpoints:
