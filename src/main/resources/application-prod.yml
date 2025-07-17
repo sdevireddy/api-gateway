@@ -35,6 +35,54 @@ spring:
                 statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
                 methods: GET, POST
 
+        # 📈 Marketing Module
+        - id: marketing-service
+          uri: lb://marketing-service
+          predicates:
+            - Path=/marketing/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
+
+        # 👥 HR Module
+        - id: hr-service
+          uri: lb://hr-service
+          predicates:
+            - Path=/hr/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
+
+        # 📝 Survey Module
+        - id: survey-service
+          uri: lb://survey-service
+          predicates:
+            - Path=/survey/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
+
+        # 📚 Books Module
+        - id: books-service
+          uri: lb://books-service
+          predicates:
+            - Path=/books/**
+          filters:
+            - name: Retry
+              args:
+                retries: 3
+                statuses: BAD_GATEWAY, GATEWAY_TIMEOUT
+                methods: GET, POST
+
       default-filters:
         - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
 
